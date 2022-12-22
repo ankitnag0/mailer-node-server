@@ -2,11 +2,17 @@ const express = require('express');
 const fileUpload = require('express-fileupload');
 const nodemailer = require('nodemailer');
 const xlsx = require('xlsx');
+const cors = require('cors');
 require('dotenv').config();
+
+const {createServer} = require('http');
+const {Server} = require('socket.io');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-// default options
+
+app.use(cors());
+
 app.use(fileUpload());
 
 app.post('/upload', async function (req, res) {
@@ -14,21 +20,30 @@ app.post('/upload', async function (req, res) {
     try {
 
         /* File Upload*/
-        let excelFile;
-        let uploadPath;
-    
+        let emailList;
+        let emailListUplaodPath;
+
+        let attachment;
+        let attachmentUploadPath;
+
+        let {subject, mailContent} = req.body;
         if (!req.files || Object.keys(req.files).length === 0) {
+            console.log('No files were uploaded')
             return res.status(400).send('No files were uploaded.');
         }
     
-        excelFile = req.files.excelFile;
-        uploadPath = __dirname + '/upload/' + excelFile.name;
+        emailList = req.files.emailList;
+        emailListUplaodPath = __dirname + '/upload/' + emailList.name;
+
+        attachment = req.files.attachment;
+        attachmentUploadPath = __dirname + '/upload/' + attachment.name;
     
-        await excelFile.mv(uploadPath);
+        await emailList.mv(emailListUplaodPath);
+        await attachment.mv(attachmentUploadPath);
         /* File Upload Ends*/
 
         /* Reading Excel File */
-        const workbook = xlsx.readFile(`./upload/${excelFile.name}`);
+        const workbook = xlsx.readFile(`./upload/${emailList.name}`);
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const emails = [];
         for(let row in worksheet){
@@ -49,14 +64,21 @@ app.post('/upload', async function (req, res) {
 
         const options = {
             from: process.env.EMAIL,
-            subject: "From Nodemailer",
-            text: "Hi Ankit, I am Ankit!"
+            subject: subject,
+            text: mailContent,
+            attachments: [
+                {
+                    filename: attachment.name,
+                    path: './upload/'+attachment.name
+                }
+            ]
         }
 
         for(let i=0; i<emails.length; i++){
             options.to = emails[i];
             await client.sendMail(options);
             console.log("Success: " + options.to);
+            io.emit('mailSuccess', {email: options.to});
         }
         /* Sending Mails Ends*/
 
@@ -64,6 +86,7 @@ app.post('/upload', async function (req, res) {
             message: "Email sent successfully",
         });
     } catch (error) {
+        console.log(error);
         return res.status(500).json({
             error: error.message,
             message: "Internal Server Error"
@@ -71,6 +94,21 @@ app.post('/upload', async function (req, res) {
     }
 });
 
-app.listen(PORT, function () {
-    console.log('Express server listening on port ', PORT);
+const server = createServer(app);
+
+const io = new Server(server, {
+    cors: {
+        origin: "http://127.0.0.1:5173"
+    }
 });
+//localhost is not equal to 127.0.0.1
+
+io.on('connection', socket => {
+    console.log(socket.id);
+})
+
+server.listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT}`);
+});
+
+module.exports = app;
